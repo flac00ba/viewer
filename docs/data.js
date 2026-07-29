@@ -215,6 +215,7 @@ export class OverviewStore {
     this.chunkSize = manifest.map.chunkSize;
     this.available = new Map();
     this.cache = new Map();
+    this.visibleKeys = new Set();
     this.clock = 0;
     this.maxImages = 128;
   }
@@ -265,6 +266,38 @@ export class OverviewStore {
     }
   }
 
+  setVisibleRanges(ranges) {
+    const visibleKeys = new Set();
+    const requests = [];
+
+    for (const { floor, bounds } of ranges) {
+      const minX = Math.floor(bounds.left / this.chunkSize) - 1;
+      const maxX = Math.floor(bounds.right / this.chunkSize) + 1;
+      const minY = Math.floor(bounds.top / this.chunkSize) - 1;
+      const maxY = Math.floor(bounds.bottom / this.chunkSize) + 1;
+
+      for (let y = minY; y <= maxY; y += 1) {
+        for (let x = minX; x <= maxX; x += 1) {
+          if (!this.hasChunk(floor, x, y)) continue;
+          visibleKeys.add(chunkKey(floor, x, y));
+          requests.push({ floor, x, y });
+        }
+      }
+    }
+
+    this.visibleKeys = visibleKeys;
+    this.evict();
+    for (const { floor, x, y } of requests) {
+      this.ensure(floor, x, y).catch(console.error);
+    }
+  }
+
+  releaseVisibleRanges() {
+    if (!this.visibleKeys.size) return;
+    this.visibleKeys.clear();
+    this.evict();
+  }
+
   loadedVisible(floor, bounds) {
     const minX = Math.floor(bounds.left / this.chunkSize) - 1;
     const maxX = Math.floor(bounds.right / this.chunkSize) + 1;
@@ -286,7 +319,7 @@ export class OverviewStore {
   evict() {
     if (this.cache.size <= this.maxImages) return;
     const candidates = [...this.cache.entries()]
-      .filter(([, record]) => record.value)
+      .filter(([key, record]) => record.value && !this.visibleKeys.has(key))
       .sort((a, b) => a[1].used - b[1].used);
     while (this.cache.size > this.maxImages && candidates.length) {
       const [key, record] = candidates.shift();

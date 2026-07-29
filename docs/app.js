@@ -155,9 +155,13 @@ function visibleTiles(bounds, renderedFloors) {
 
 function visibleOverviews(bounds, renderedFloors) {
   const result = [];
-  for (const sourceFloor of renderedFloors) {
-    const boundsOnSourceFloor = sourceBounds(bounds, sourceFloor);
-    overviewStore.requestVisible(sourceFloor, boundsOnSourceFloor);
+  const ranges = renderedFloors.map((sourceFloor) => ({
+    floor: sourceFloor,
+    bounds: sourceBounds(bounds, sourceFloor),
+  }));
+  overviewStore.setVisibleRanges(ranges);
+
+  for (const { floor: sourceFloor, bounds: boundsOnSourceFloor } of ranges) {
     for (const image of overviewStore.loadedVisible(sourceFloor, boundsOnSourceFloor)) {
       result.push({ ...image, drawOffsetTiles: sourceFloor - floor });
     }
@@ -210,6 +214,7 @@ function render(timeMs) {
 
   if (camera.zoom >= DETAIL_ZOOM_THRESHOLD) {
     mode = "detail";
+    overviewStore.releaseVisibleRanges();
     elements.detail.hidden = false;
     elements.overview.hidden = true;
     instances = detailRenderer.render(camera, visibleTiles(bounds, renderedFloors), timeMs, options, dpr);

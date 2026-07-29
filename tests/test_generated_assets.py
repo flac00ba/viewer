@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import gzip
 import json
+import shutil
 import struct
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -123,6 +125,17 @@ class GeneratedViewerTests(unittest.TestCase):
     def test_github_file_limit_has_large_safety_margin(self) -> None:
         largest = max(path.stat().st_size for path in DOCS.rglob("*") if path.is_file())
         self.assertLess(largest, 25 * 1024 * 1024)
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    def test_visible_overviews_are_not_evicted(self) -> None:
+        result = subprocess.run(
+            ["node", str(PROJECT / "tests" / "overview_cache_test.mjs")],
+            cwd=PROJECT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":
