@@ -511,11 +511,28 @@ export class DetailRenderer {
   }
 
   renderCreature(tile, entry, cursor, timeMs, options) {
-    const creature = this.things.creatures[entry.id];
+    let creatureId = entry.id;
+    if (entry.kind === 2) {
+      const group = this.things.spawnGroups?.[entry.id];
+      const candidates = group?.entries.filter((candidate) => Number.isInteger(candidate.creatureId)) ?? [];
+      if (!candidates.length) return;
+      const totalWeight = candidates.reduce((total, candidate) => total + candidate.weight, 0);
+      const cycle = options.animations ? Math.floor(timeMs / 2500) : 0;
+      const roll = hashPosition(tile.x, tile.y, entry.id + 131072 + cycle) % Math.max(1, totalWeight);
+      let accumulatedWeight = 0;
+      const selected =
+        candidates.find((candidate) => {
+          accumulatedWeight += candidate.weight;
+          return roll < accumulatedWeight;
+        }) ?? candidates[candidates.length - 1];
+      creatureId = selected.creatureId;
+    }
+
+    const creature = this.things.creatures[creatureId];
     if (!creature?.thing || !options.creatures) return;
     const group = this.resolver.groupFor(creature.thing, options.movingCreatureFrames);
     if (!group) return;
-    const seed = hashPosition(tile.x, tile.y, entry.id + 65536);
+    const seed = hashPosition(tile.x, tile.y, creatureId + 65536);
     const frame = this.resolver.phaseAt(group, timeMs, seed, options.animations);
     const parts = this.resolver.creatureParts(
       group,
@@ -562,7 +579,7 @@ export class DetailRenderer {
           cursor.y -= definition.elevation;
         }
       }
-      for (const entry of tile.entries.filter((value) => value.kind === 1)) {
+      for (const entry of tile.entries.filter((value) => value.kind === 1 || value.kind === 2)) {
         this.renderCreature(tile, entry, cursor, timeMs, options);
       }
     }
@@ -664,27 +681,55 @@ export class CreatureOverlayRenderer {
       const drawX = tile.drawX ?? tile.x;
       const drawY = tile.drawY ?? tile.y;
       for (const entry of tile.entries) {
-        if (entry.kind !== 1) continue;
-        const creature = things.creatures[entry.id];
-        if (!creature?.thing) continue;
-        const height = Math.max(1, ...creature.thing.groups.map((group) => group.height ?? 1));
+        let name;
+        let creatureThings;
+        let focused;
+        if (entry.kind === 1) {
+          const creature = things.creatures[entry.id];
+          if (!creature?.thing) continue;
+          name = creature.name;
+          creatureThings = [creature.thing];
+          focused =
+            focus?.x === tile.x &&
+            focus?.y === tile.y &&
+            focus?.z === tile.z &&
+            focus?.creatureId === entry.id &&
+            focus?.groupIndex == null;
+        } else if (entry.kind === 2) {
+          const group = things.spawnGroups?.[entry.id];
+          if (!group) continue;
+          name = `Grupa: ${group.name}`;
+          creatureThings = group.entries
+            .map((candidate) => things.creatures[candidate.creatureId]?.thing)
+            .filter(Boolean);
+          if (!creatureThings.length) continue;
+          focused =
+            focus?.x === tile.x &&
+            focus?.y === tile.y &&
+            focus?.z === tile.z &&
+            focus?.groupIndex === entry.id;
+        } else {
+          continue;
+        }
+        const topOffset = Math.max(
+          0,
+          ...creatureThings.flatMap((thing) =>
+            thing.groups.map((group) => (Math.max(1, group.height ?? 1) - 1) * TILE_PIXELS + thing.offsetY),
+          ),
+        );
         const point = this.screenPoint(
           camera,
           (drawX + 0.5) * TILE_PIXELS,
-          drawY * TILE_PIXELS - (height - 1) * TILE_PIXELS - creature.thing.offsetY - 5,
+          drawY * TILE_PIXELS - topOffset - 5,
         );
         if (point.x < -120 || point.x > camera.width + 120 || point.y < -30 || point.y > camera.height + 30) {
           continue;
         }
         labels.push({
-          name: creature.name,
+          name,
           x: point.x,
           y: point.y,
-          focused:
-            focus?.x === tile.x &&
-            focus?.y === tile.y &&
-            focus?.z === tile.z &&
-            focus?.creatureId === entry.id,
+          focused,
         });
       }
     }

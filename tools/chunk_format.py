@@ -10,6 +10,7 @@ MAGIC = b"YMC1"
 VERSION = 1
 ENTRY_ITEM = 0
 ENTRY_CREATURE = 1
+ENTRY_SPAWN_GROUP = 2
 
 
 @dataclass(slots=True)
@@ -43,7 +44,7 @@ def encode(chunk_size: int, tiles: list[ChunkTile]) -> bytes:
             raise ValueError("too many entries on one tile")
         output += struct.pack("<BBIIH", tile.local_x, tile.local_y, tile.flags, tile.house_id, len(tile.entries))
         for entry in tile.entries:
-            if entry.kind not in (ENTRY_ITEM, ENTRY_CREATURE):
+            if entry.kind not in (ENTRY_ITEM, ENTRY_CREATURE, ENTRY_SPAWN_GROUP):
                 raise ValueError(f"unknown entry kind {entry.kind}")
             output += struct.pack("<BHH", entry.kind, entry.identifier, entry.value)
     return bytes(output)

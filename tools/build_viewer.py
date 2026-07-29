@@ -26,7 +26,7 @@ VENDOR_DIR = TOOLS_DIR / "vendor"
 sys.path.insert(0, str(VENDOR_DIR))
 sys.path.insert(0, str(TOOLS_DIR))
 
-from chunk_format import ENTRY_CREATURE, ENTRY_ITEM, ChunkEntry, ChunkTile, encode_gzip
+from chunk_format import ENTRY_CREATURE, ENTRY_ITEM, ENTRY_SPAWN_GROUP, ChunkEntry, ChunkTile, encode_gzip
 import otbm
 from tibia76_dat import DatFrameGroup, DatObject, Tibia76Dat
 from tibia76_otb import Tibia76Otb
@@ -57,6 +57,20 @@ class SpawnCreature:
     y: int
     z: int
     direction: int
+
+
+@dataclass(slots=True)
+class SpawnGroupMember:
+    name: str
+    weight: int
+
+
+@dataclass(slots=True)
+class SpawnGroupDefinition:
+    group_id: int
+    name: str
+    members: list[SpawnGroupMember]
+    total_weight: int
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -177,6 +191,65 @@ def load_spawns(path: Path) -> list[SpawnCreature]:
                 )
             )
     return result
+
+
+def load_spawn_groups(path: Path) -> dict[int, SpawnGroupDefinition]:
+    if not path.exists():
+        return {}
+    root = ET.parse(path).getroot()
+    if root.tag.lower() != "spawns":
+        raise ValueError(f"Invalid spawn group root in {path}: expected <spawns>")
+
+    result: dict[int, SpawnGroupDefinition] = {}
+    names: set[str] = set()
+    for group in root:
+        if group.tag.lower() != "group":
+            continue
+        group_id = _xml_int(group, "id")
+        name = group.attrib.get("name", "").strip()
+        if group_id <= 0 or not name:
+            raise ValueError(f"Spawn group in {path} requires a positive id and non-empty name")
+        if group_id in result:
+            raise ValueError(f"Duplicate spawn group id {group_id} in {path}")
+        normalized_name = name.casefold()
+        if normalized_name in names:
+            raise ValueError(f"Duplicate spawn group name {name!r} in {path}")
+        names.add(normalized_name)
+
+        members: list[SpawnGroupMember] = []
+        member_names: set[str] = set()
+        total_weight = 0
+        for monster in group:
+            if monster.tag.lower() != "monster":
+                continue
+            monster_name = monster.attrib.get("name", "").strip()
+            weight = _xml_int(monster, "chance")
+            if not monster_name or weight <= 0:
+                raise ValueError(f"Spawn group {name!r} has an invalid monster entry")
+            member_key = monster_name.casefold()
+            if member_key in member_names:
+                raise ValueError(f"Spawn group {name!r} contains duplicate monster {monster_name!r}")
+            member_names.add(member_key)
+            total_weight += weight
+            if total_weight > 0xFFFFFFFF:
+                raise ValueError(f"Spawn group {name!r} total weight exceeds uint32")
+            members.append(SpawnGroupMember(monster_name, weight))
+        if not members:
+            raise ValueError(f"Spawn group {name!r} has no monsters")
+        result[group_id] = SpawnGroupDefinition(group_id, name, members, total_weight)
+    return result
+
+
+def spawn_group_token_id(name: str) -> int | None:
+    normalized = name.casefold()
+    prefix = "groupid"
+    if not normalized.startswith(prefix):
+        return None
+    suffix = normalized[len(prefix):]
+    if not suffix.isdigit():
+        return None
+    group_id = int(suffix)
+    return group_id if group_id > 0 else None
 
 
 def _dat_item(dat: Tibia76Dat, client_id: int) -> DatObject | None:
@@ -663,6 +736,12 @@ def build(config_path: Path) -> None:
     dat_path = _resolve(config_path, paths["dat"])
     spr_path = _resolve(config_path, paths["spr"])
     creatures_path = _resolve(config_path, paths["creatures"])
+    spawn_groups_path_value = paths.get("spawnGroups")
+    spawn_groups_path = (
+        _resolve(config_path, spawn_groups_path_value)
+        if isinstance(spawn_groups_path_value, str)
+        else creatures_path.parent / "data" / "spawngroups.xml"
+    )
     final_output_path = _resolve(config_path, config.get("output", "docs/assets"))
     output_path = final_output_path.with_name(f".{final_output_path.name}.building")
     _safe_reset_working_output(output_path, final_output_path)
@@ -689,16 +768,36 @@ def build(config_path: Path) -> None:
     spawn_path = _resolve(config_path, spawn_path_value) if isinstance(spawn_path_value, str) else map_path.with_name(world.spawn_file or f"{map_path.stem}-spawn.xml")
     spawns = load_spawns(spawn_path)
     creature_looks = load_creature_looks(creatures_path)
+    spawn_groups = load_spawn_groups(spawn_groups_path)
 
     used_server_ids = {item.server_id for tile in world.tiles for item in tile.items}
     used_looks: dict[str, CreatureLook] = {}
     missing_creatures: set[str] = set()
+    missing_spawn_group_ids: set[int] = set()
+    used_spawn_groups: dict[int, SpawnGroupDefinition] = {}
     for spawn in spawns:
-        look = creature_looks.get(spawn.name.casefold())
+        group_id = spawn_group_token_id(spawn.name)
+        if group_id is not None:
+            group = spawn_groups.get(group_id)
+            if group is None:
+                missing_spawn_group_ids.add(group_id)
+                continue
+            used_spawn_groups[group_id] = group
+            for member in group.members:
+                member_key = member.name.casefold()
+                look = creature_looks.get(member_key)
+                if look is None:
+                    missing_creatures.add(member.name)
+                else:
+                    used_looks.setdefault(member_key, look)
+            continue
+
+        spawn_key = spawn.name.casefold()
+        look = creature_looks.get(spawn_key)
         if look is None:
             missing_creatures.add(spawn.name)
         else:
-            used_looks.setdefault(spawn.name.casefold(), look)
+            used_looks.setdefault(spawn_key, look)
 
     item_things: dict[int, DatObject] = {}
     missing_items: list[int] = []
@@ -774,6 +873,34 @@ def build(config_path: Path) -> None:
             }
         )
 
+    spawn_group_indices: dict[int, int] = {}
+    spawn_groups_payload: list[dict[str, Any]] = []
+    for group_id, group in sorted(used_spawn_groups.items()):
+        members_payload = []
+        for member in group.members:
+            creature_index = creature_indices.get(member.name.casefold())
+            members_payload.append(
+                {
+                    "creatureId": creature_index,
+                    "name": (
+                        creatures_payload[creature_index]["name"]
+                        if creature_index is not None
+                        else member.name
+                    ),
+                    "weight": member.weight,
+                }
+            )
+        spawn_group_indices[group_id] = len(spawn_groups_payload)
+        spawn_groups_payload.append(
+            {
+                "id": group.group_id,
+                "name": group.name,
+                "token": f"groupid{group.group_id}",
+                "totalWeight": group.total_weight,
+                "entries": members_payload,
+            }
+        )
+
     cells_per_row = atlas_size // SPRITE_SIZE
     _gzip_json(
         output_path / "things.json.gz",
@@ -787,17 +914,39 @@ def build(config_path: Path) -> None:
             },
             "items": items_payload,
             "creatures": creatures_payload,
+            "spawnGroups": spawn_groups_payload,
         },
     )
 
     spawn_positions: dict[int, list[list[int]]] = defaultdict(list)
+    spawn_group_positions: dict[int, list[list[int]]] = defaultdict(list)
+    indexed_spawn_count = 0
     for spawn in spawns:
+        group_id = spawn_group_token_id(spawn.name)
+        if group_id is not None:
+            group_index = spawn_group_indices.get(group_id)
+            if group_index is None:
+                continue
+            position = [spawn.x, spawn.y, spawn.z]
+            spawn_group_positions[group_index].append(position)
+            indexed_spawn_count += 1
+            for member in spawn_groups_payload[group_index]["entries"]:
+                creature_index = member["creatureId"]
+                if creature_index is not None:
+                    spawn_positions[creature_index].append([spawn.x, spawn.y, spawn.z, group_index])
+            continue
+
         creature_index = creature_indices.get(spawn.name.casefold())
         if creature_index is not None:
             spawn_positions[creature_index].append([spawn.x, spawn.y, spawn.z])
+            indexed_spawn_count += 1
     for positions in spawn_positions.values():
         positions.sort(key=lambda position: (position[2], position[1], position[0]))
-    indexed_spawn_count = sum(len(positions) for positions in spawn_positions.values())
+    for positions in spawn_group_positions.values():
+        positions.sort(key=lambda position: (position[2], position[1], position[0]))
+    spawn_search_links = sum(len(positions) for positions in spawn_positions.values()) + sum(
+        len(positions) for positions in spawn_group_positions.values()
+    )
     _gzip_json(
         output_path / "spawns.json.gz",
         {
@@ -812,6 +961,15 @@ def build(config_path: Path) -> None:
                     spawn_positions,
                     key=lambda index: creatures_payload[index]["name"].casefold(),
                 )
+            ],
+            "groups": [
+                {
+                    **group,
+                    "groupIndex": group_index,
+                    "positions": spawn_group_positions[group_index],
+                }
+                for group_index, group in enumerate(spawn_groups_payload)
+                if spawn_group_positions.get(group_index)
             ],
         },
     )
@@ -836,9 +994,10 @@ def build(config_path: Path) -> None:
         floor_counts[tile.z] += 1
 
     for spawn in spawns:
-        key = spawn.name.casefold()
-        creature_index = creature_indices.get(key)
-        if creature_index is None:
+        group_id = spawn_group_token_id(spawn.name)
+        group_index = spawn_group_indices.get(group_id) if group_id is not None else None
+        creature_index = creature_indices.get(spawn.name.casefold()) if group_id is None else None
+        if group_index is None and creature_index is None:
             continue
         tile = tiles_by_position.get((spawn.x, spawn.y, spawn.z))
         if tile is None:
@@ -847,7 +1006,10 @@ def build(config_path: Path) -> None:
             tile = ChunkTile(spawn.x - chunk_x * chunk_size, spawn.y - chunk_y * chunk_size)
             chunks[(spawn.z, chunk_x, chunk_y)].append(tile)
             tiles_by_position[(spawn.x, spawn.y, spawn.z)] = tile
-        tile.entries.append(ChunkEntry(ENTRY_CREATURE, creature_index, spawn.direction))
+        if group_index is not None:
+            tile.entries.append(ChunkEntry(ENTRY_SPAWN_GROUP, group_index, spawn.direction))
+        else:
+            tile.entries.append(ChunkEntry(ENTRY_CREATURE, creature_index, spawn.direction))
 
     chunk_index: dict[int, list[list[int]]] = defaultdict(list)
     for (floor, chunk_x, chunk_y), tiles in sorted(chunks.items()):
@@ -901,6 +1063,8 @@ def build(config_path: Path) -> None:
             "items": sum(len(tile.items) for tile in world.tiles),
             "spawns": len(spawns),
             "indexedSpawns": indexed_spawn_count,
+            "spawnSearchLinks": spawn_search_links,
+            "spawnGroups": len(spawn_groups_payload),
             "usedItemTypes": len(item_things),
             "usedCreatureTypes": len(creature_things),
             "usedSprites": len(used_sprite_ids),
@@ -908,10 +1072,12 @@ def build(config_path: Path) -> None:
             "chunks": len(chunks),
             "missingItems": len(missing_items),
             "missingCreatures": len(missing_creatures),
+            "missingSpawnGroups": len(missing_spawn_group_ids),
         },
         "warnings": {
             "missingItemIds": missing_items[:100],
             "missingCreatureNames": sorted(missing_creatures)[:100],
+            "missingSpawnGroupIds": sorted(missing_spawn_group_ids)[:100],
         },
     }
     with (output_path / "manifest.json").open("w", encoding="utf-8", newline="\n") as handle:
@@ -928,6 +1094,8 @@ def build(config_path: Path) -> None:
         print(f"Warning: {len(missing_items)} server item ids have no usable OTB/DAT mapping")
     if missing_creatures:
         print(f"Warning: {len(missing_creatures)} spawn creature names are absent from creatures.xml")
+    if missing_spawn_group_ids:
+        print(f"Warning: {len(missing_spawn_group_ids)} referenced spawn group ids are absent from spawngroups.xml")
 
 
 def main() -> None:

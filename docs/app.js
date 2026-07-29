@@ -60,8 +60,10 @@ const options = {
 
 let manifest;
 let things;
-let spawnIndex = { version: 1, creatures: [] };
-let spawnByCreatureId = new Map();
+let spawnIndex = { version: 1, creatures: [], groups: [] };
+let spawnSearchEntries = [];
+let spawnSearchByKey = new Map();
+let spawnGroupsByIndex = new Map();
 let camera;
 let floor;
 let floors = [];
@@ -77,7 +79,7 @@ let activePointer = null;
 let pointerMoved = false;
 let cursorTile = null;
 let toastTimer = 0;
-let selectedSearchCreature = null;
+let selectedSearchEntry = null;
 let focusedSpawn = null;
 
 function clampFloor(value) {
@@ -343,6 +345,12 @@ function entryLabel(entry) {
     const creature = things.creatures[entry.id];
     return creature ? `Potwór: ${creature.name}` : `Potwór #${entry.id}`;
   }
+  if (entry.kind === 2) {
+    const group = things.spawnGroups?.[entry.id];
+    return group
+      ? `Losowa grupa: ${group.name} · ${spawnGroupMembersLabel(group)}`
+      : `Losowa grupa #${entry.id}`;
+  }
   const item = things.items[String(entry.id)];
   const suffix =
     item?.flags.stackable && entry.value > 1
@@ -364,7 +372,7 @@ async function inspectTile(position) {
       return;
     }
     const rows = tile.entries.map(
-      (entry) => `<li><span class="entry-kind">${entry.kind === 1 ? "C" : "I"}</span>${escapeHtml(entryLabel(entry))}</li>`,
+      (entry) => `<li><span class="entry-kind">${entry.kind === 1 ? "C" : entry.kind === 2 ? "G" : "I"}</span>${escapeHtml(entryLabel(entry))}</li>`,
     );
     elements.inspectorContent.innerHTML = `
       <dl class="tile-meta">
@@ -402,25 +410,52 @@ function pluralLabel(count, singular, pluralFew, pluralMany) {
   return pluralMany;
 }
 
+function spawnGroupMembersLabel(group) {
+  return group.entries
+    .map((entry) => {
+      const chance = group.totalWeight > 0 ? (entry.weight / group.totalWeight) * 100 : 0;
+      return `${entry.name} ${chance.toLocaleString("pl-PL", {
+        minimumFractionDigits: chance < 1 ? 2 : 1,
+        maximumFractionDigits: 2,
+      })}%`;
+    })
+    .join(" · ");
+}
+
 function renderSpawnSearch() {
-  if (selectedSearchCreature) {
-    const positions = selectedSearchCreature.positions;
+  if (selectedSearchEntry) {
+    const positions = selectedSearchEntry.positions;
+    const groupDescription =
+      selectedSearchEntry.kind === "group"
+        ? `<span>Losowanie: ${escapeHtml(spawnGroupMembersLabel(selectedSearchEntry))}</span>`
+        : positions.some((position) => position.length > 3)
+          ? "<span>Lista zawiera także pozycje, na których ten potwór może zostać wylosowany z grupy.</span>"
+          : "";
     elements.spawnSearchBack.hidden = false;
-    elements.spawnSearchSummary.textContent = "Wybierz spawn, aby przejść bezpośrednio na jego pozycję.";
+    elements.spawnSearchSummary.textContent = "Wybierz lokalizację, aby przejść bezpośrednio na jej pozycję.";
     elements.spawnSearchResults.innerHTML = `
       <div class="spawn-selected-card">
-        <strong>${escapeHtml(selectedSearchCreature.name)}</strong>
-        <span>${positions.length} ${pluralLabel(positions.length, "spawn", "spawny", "spawnów")}</span>
+        <strong>${escapeHtml(selectedSearchEntry.name)}</strong>
+        <span>${positions.length} ${pluralLabel(positions.length, "lokalizacja", "lokalizacje", "lokalizacji")}</span>
+        ${groupDescription}
       </div>
       ${positions
         .map(
-          ([x, y, z], index) => `
+          ([x, y, z, positionGroupIndex], index) => {
+            const groupIndex =
+              positionGroupIndex ?? (selectedSearchEntry.kind === "group" ? selectedSearchEntry.groupIndex : null);
+            const group = groupIndex != null ? spawnGroupsByIndex.get(groupIndex) : null;
+            return `
             <button class="spawn-position" type="button" data-position-index="${index}">
               <span class="spawn-position-number">${String(index + 1).padStart(2, "0")}</span>
               <strong>X ${x} · Y ${y}</strong>
-              <em>Z ${z}</em>
+              <span class="spawn-position-meta">
+                <em>Z ${z}</em>
+                ${group ? `<small>GRUPA ${escapeHtml(group.name)}</small>` : ""}
+              </span>
             </button>
-          `,
+          `;
+          },
         )
         .join("")}
     `;
@@ -429,24 +464,27 @@ function renderSpawnSearch() {
 
   elements.spawnSearchBack.hidden = true;
   const query = normalizeSearch(elements.spawnSearchInput.value.trim());
-  const matches = spawnIndex.creatures.filter((creature) => normalizeSearch(creature.name).includes(query));
-  const spawnCount = matches.reduce((total, creature) => total + creature.positions.length, 0);
+  const matches = spawnSearchEntries.filter((entry) => entry.searchText.includes(query));
+  const locationCount = matches.reduce((total, entry) => total + entry.positions.length, 0);
   elements.spawnSearchSummary.textContent = query
-    ? `${matches.length} ${pluralLabel(matches.length, "wynik", "wyniki", "wyników")} · ${spawnCount} ${pluralLabel(spawnCount, "spawn", "spawny", "spawnów")}`
-    : `${matches.length} rodzajów potworów · ${spawnCount} ${pluralLabel(spawnCount, "spawn", "spawny", "spawnów")}`;
+    ? `${matches.length} ${pluralLabel(matches.length, "wynik", "wyniki", "wyników")} · ${locationCount} ${pluralLabel(locationCount, "lokalizacja", "lokalizacje", "lokalizacji")}`
+    : `${spawnIndex.creatures.length} rodzajów potworów · ${spawnIndex.groups.length} ${pluralLabel(spawnIndex.groups.length, "grupa", "grupy", "grup")}`;
 
   elements.spawnSearchResults.innerHTML = matches.length
     ? matches
         .map(
-          (creature) => `
-            <button class="spawn-result" type="button" data-creature-id="${creature.id}">
-              <span class="spawn-result-name">${escapeHtml(creature.name)}</span>
-              <span class="spawn-result-count">${creature.positions.length} ${pluralLabel(creature.positions.length, "spawn", "spawny", "spawnów")}</span>
+          (entry) => `
+            <button class="spawn-result" type="button" data-search-key="${entry.key}">
+              <span class="spawn-result-copy">
+                <span class="spawn-result-name">${escapeHtml(entry.name)}</span>
+                ${entry.kind === "group" ? '<small>LOSOWA GRUPA</small>' : ""}
+              </span>
+              <span class="spawn-result-count">${entry.positions.length} ${pluralLabel(entry.positions.length, "lokalizacja", "lokalizacje", "lokalizacji")}</span>
             </button>
           `,
         )
         .join("")
-    : '<p class="spawn-empty">Nie znaleziono takiego potwora na mapie.</p>';
+    : '<p class="spawn-empty">Nie znaleziono takiego potwora ani grupy na mapie.</p>';
 }
 
 function openSpawnSearch() {
@@ -464,32 +502,35 @@ function closeSpawnSearch() {
   elements.spawnSearchToggle.setAttribute("aria-expanded", "false");
 }
 
-function selectSearchCreature(creatureId) {
-  selectedSearchCreature = spawnByCreatureId.get(creatureId) ?? null;
-  if (!selectedSearchCreature) return;
-  elements.spawnSearchInput.value = selectedSearchCreature.name;
+function selectSearchEntry(key) {
+  selectedSearchEntry = spawnSearchByKey.get(key) ?? null;
+  if (!selectedSearchEntry) return;
+  elements.spawnSearchInput.value = selectedSearchEntry.name;
   renderSpawnSearch();
 }
 
 function goToSpawn(positionIndex) {
-  const position = selectedSearchCreature?.positions[positionIndex];
+  const position = selectedSearchEntry?.positions[positionIndex];
   if (!position) return;
-  const [x, y, z] = position;
+  const [x, y, z, positionGroupIndex] = position;
+  const groupIndex =
+    positionGroupIndex ?? (selectedSearchEntry.kind === "group" ? selectedSearchEntry.groupIndex : null);
   options.creatures = true;
   elements.creatures.checked = true;
   focusedSpawn = {
     x,
     y,
     z,
-    creatureId: selectedSearchCreature.id,
-    name: selectedSearchCreature.name,
+    creatureId: groupIndex == null && selectedSearchEntry.kind === "creature" ? selectedSearchEntry.id : null,
+    groupIndex,
+    name: selectedSearchEntry.name,
   };
   camera.centerOn(x, y);
   camera.zoom = Math.max(1, camera.zoom);
   setFloor(z);
   closeSpawnSearch();
   updateUrl(true);
-  showToast(`${selectedSearchCreature.name} · ${x}, ${y}, ${z}`);
+  showToast(`${selectedSearchEntry.name} · ${x}, ${y}, ${z}`);
   invalidate();
 }
 
@@ -499,6 +540,7 @@ function goToCoordinates(event) {
   const y = Number(elements.y.value);
   const z = Number(elements.z.value);
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
+  focusedSpawn = null;
   camera.centerOn(Math.trunc(x), Math.trunc(y));
   setFloor(Math.trunc(z));
   updateUrl(true);
@@ -623,20 +665,20 @@ function bindEvents() {
   });
   elements.spawnSearchClose.addEventListener("click", closeSpawnSearch);
   elements.spawnSearchBack.addEventListener("click", () => {
-    selectedSearchCreature = null;
+    selectedSearchEntry = null;
     elements.spawnSearchInput.value = "";
     renderSpawnSearch();
     elements.spawnSearchInput.focus();
   });
   elements.spawnSearchInput.addEventListener("input", () => {
-    selectedSearchCreature = null;
+    selectedSearchEntry = null;
     renderSpawnSearch();
   });
   elements.spawnSearchResults.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;
-    const creatureButton = event.target.closest("[data-creature-id]");
-    if (creatureButton) {
-      selectSearchCreature(Number(creatureButton.dataset.creatureId));
+    const resultButton = event.target.closest("[data-search-key]");
+    if (resultButton) {
+      selectSearchEntry(resultButton.dataset.searchKey);
       return;
     }
     const positionButton = event.target.closest("[data-position-index]");
@@ -661,9 +703,29 @@ async function boot() {
       loadGzipJson(new URL(manifest.assets.things, ASSET_ROOT)),
       manifest.assets.spawns
         ? loadGzipJson(new URL(manifest.assets.spawns, ASSET_ROOT))
-        : Promise.resolve({ version: 1, creatures: [] }),
+        : Promise.resolve({ version: 1, creatures: [], groups: [] }),
     ]);
-    spawnByCreatureId = new Map(spawnIndex.creatures.map((creature) => [creature.id, creature]));
+    spawnIndex.creatures ??= [];
+    spawnIndex.groups ??= [];
+    spawnGroupsByIndex = new Map(spawnIndex.groups.map((group) => [group.groupIndex, group]));
+    spawnSearchEntries = [
+      ...spawnIndex.creatures.map((creature) => ({
+        ...creature,
+        key: `creature:${creature.id}`,
+        kind: "creature",
+        searchText: normalizeSearch(creature.name),
+      })),
+      ...spawnIndex.groups.map((group) => ({
+        ...group,
+        key: `group:${group.groupIndex}`,
+        kind: "group",
+        name: `Grupa: ${group.name}`,
+        searchText: normalizeSearch(
+          `${group.name} ${group.token} ${group.entries.map((entry) => entry.name).join(" ")}`,
+        ),
+      })),
+    ].sort((left, right) => left.name.localeCompare(right.name, "en", { sensitivity: "base" }));
+    spawnSearchByKey = new Map(spawnSearchEntries.map((entry) => [entry.key, entry]));
 
     const initial = manifest.map.initial;
     camera = new Camera(

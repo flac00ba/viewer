@@ -1,7 +1,7 @@
 {
   "version": 1,
   "title": "YurOTS World Map",
-  "generatedAt": "2026-07-29T18:47:40.847106+00:00",
+  "generatedAt": "2026-07-29T19:18:29.527054+00:00",
   "map": {
     "name": "mapa.otbm",
     "width": 2048,
@@ -1913,19 +1913,21 @@
     "tiles": 648472,
     "items": 793162,
     "spawns": 2233,
-    "indexedSpawns": 2113,
+    "indexedSpawns": 2233,
+    "spawnSearchLinks": 2593,
+    "spawnGroups": 1,
     "usedItemTypes": 5042,
-    "usedCreatureTypes": 69,
+    "usedCreatureTypes": 70,
     "usedSprites": 20457,
     "atlasPages": 17,
     "chunks": 428,
     "missingItems": 0,
-    "missingCreatures": 1
+    "missingCreatures": 0,
+    "missingSpawnGroups": 0
   },
   "warnings": {
     "missingItemIds": [],
-    "missingCreatureNames": [
-      "groupid1"
-    ]
+    "missingCreatureNames": [],
+    "missingSpawnGroupIds": []
   }
 }

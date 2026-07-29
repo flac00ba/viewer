@@ -17,7 +17,7 @@ DOCS = PROJECT / "docs"
 ASSETS = DOCS / "assets"
 sys.path.insert(0, str(TOOLS))
 
-from chunk_format import ChunkEntry, ChunkTile, encode, encode_gzip  # noqa: E402
+from chunk_format import ENTRY_SPAWN_GROUP, ChunkEntry, ChunkTile, encode, encode_gzip  # noqa: E402
 
 
 class ChunkFormatTests(unittest.TestCase):
@@ -27,16 +27,17 @@ class ChunkFormatTests(unittest.TestCase):
             local_y=9,
             flags=0x10203040,
             house_id=81,
-            entries=[ChunkEntry(0, 2160, 100), ChunkEntry(1, 3, 2)],
+            entries=[ChunkEntry(0, 2160, 100), ChunkEntry(1, 3, 2), ChunkEntry(2, 0, 1)],
         )
         payload = encode(64, [tile])
 
         self.assertEqual(payload[:4], b"YMC1")
         version, chunk_size, tile_count = struct.unpack_from("<BBH", payload, 4)
         self.assertEqual((version, chunk_size, tile_count), (1, 64, 1))
-        self.assertEqual(struct.unpack_from("<BBIIH", payload, 8), (7, 9, 0x10203040, 81, 2))
+        self.assertEqual(struct.unpack_from("<BBIIH", payload, 8), (7, 9, 0x10203040, 81, 3))
         self.assertEqual(struct.unpack_from("<BHH", payload, 20), (0, 2160, 100))
         self.assertEqual(struct.unpack_from("<BHH", payload, 25), (1, 3, 2))
+        self.assertEqual(struct.unpack_from("<BHH", payload, 30), (2, 0, 1))
 
     def test_gzip_is_reproducible(self) -> None:
         tiles = [ChunkTile(1, 2, entries=[ChunkEntry(0, 100, 1)])]
@@ -89,24 +90,72 @@ class GeneratedViewerTests(unittest.TestCase):
 
     def test_spawn_search_index_is_consistent(self) -> None:
         creatures = self.spawns["creatures"]
+        groups = self.spawns["groups"]
         creature_ids = [entry["id"] for entry in creatures]
         names = [entry["name"] for entry in creatures]
-        positions = [position for entry in creatures for position in entry["positions"]]
+        creature_positions = [position for entry in creatures for position in entry["positions"]]
+        group_positions = [position for group in groups for position in group["positions"]]
+        direct_positions = [position for position in creature_positions if len(position) == 3]
 
         self.assertEqual(self.spawns["version"], 1)
         self.assertEqual(len(creature_ids), len(set(creature_ids)))
         self.assertEqual(names, sorted(names, key=str.casefold))
-        self.assertEqual(self.manifest["stats"]["indexedSpawns"], len(positions))
-        self.assertLessEqual(len(positions), self.manifest["stats"]["spawns"])
+        self.assertEqual(self.manifest["stats"]["spawnGroups"], len(groups))
+        self.assertEqual(self.manifest["stats"]["indexedSpawns"], len(direct_positions) + len(group_positions))
+        self.assertEqual(self.manifest["stats"]["spawnSearchLinks"], len(creature_positions) + len(group_positions))
+        self.assertLessEqual(self.manifest["stats"]["indexedSpawns"], self.manifest["stats"]["spawns"])
 
         chunk_size = self.manifest["map"]["chunkSize"]
         for entry in creatures:
             self.assertGreaterEqual(entry["id"], 0)
             self.assertLess(entry["id"], len(self.things["creatures"]))
             self.assertEqual(entry["name"], self.things["creatures"][entry["id"]]["name"])
-            for x, y, z in entry["positions"]:
+            for position in entry["positions"]:
+                self.assertIn(len(position), (3, 4))
+                x, y, z = position[:3]
                 descriptor = self.manifest["map"]["floors"][str(z)]
                 self.assertIn([x // chunk_size, y // chunk_size], descriptor["chunks"])
+                if len(position) == 4:
+                    self.assertGreaterEqual(position[3], 0)
+                    self.assertLess(position[3], len(groups))
+
+        self.assertEqual(len(self.things["spawnGroups"]), len(groups))
+        for group in groups:
+            group_index = group["groupIndex"]
+            self.assertGreaterEqual(group_index, 0)
+            self.assertLess(group_index, len(self.things["spawnGroups"]))
+            self.assertEqual(group["id"], self.things["spawnGroups"][group_index]["id"])
+            self.assertEqual(group["name"], self.things["spawnGroups"][group_index]["name"])
+            self.assertEqual(group["totalWeight"], sum(member["weight"] for member in group["entries"]))
+            for member in group["entries"]:
+                self.assertGreater(member["weight"], 0)
+                if member["creatureId"] is None:
+                    missing_names = {name.casefold() for name in self.manifest["warnings"]["missingCreatureNames"]}
+                    self.assertIn(member["name"].casefold(), missing_names)
+                else:
+                    self.assertIsInstance(member["creatureId"], int)
+                    self.assertEqual(member["name"], self.things["creatures"][member["creatureId"]]["name"])
+            for x, y, z in group["positions"]:
+                descriptor = self.manifest["map"]["floors"][str(z)]
+                self.assertIn([x // chunk_size, y // chunk_size], descriptor["chunks"])
+
+    def test_spawn_group_slots_are_encoded_in_chunks(self) -> None:
+        encoded_group_entries = 0
+        for path in (ASSETS / "chunks").rglob("*.bin.gz"):
+            payload = gzip.decompress(path.read_bytes())
+            tile_count = struct.unpack_from("<H", payload, 6)[0]
+            offset = 8
+            for _ in range(tile_count):
+                entry_count = struct.unpack_from("<H", payload, offset + 10)[0]
+                offset += 12
+                for _ in range(entry_count):
+                    kind = payload[offset]
+                    encoded_group_entries += kind == ENTRY_SPAWN_GROUP
+                    offset += 5
+            self.assertEqual(offset, len(payload), path)
+
+        expected = sum(len(group["positions"]) for group in self.spawns["groups"])
+        self.assertEqual(encoded_group_entries, expected)
 
     def test_initial_position_points_to_an_existing_chunk(self) -> None:
         initial = self.manifest["map"]["initial"]

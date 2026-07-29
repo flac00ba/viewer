@@ -4,6 +4,7 @@
   "paths": {
     "map": "../data/world/mapa.otbm",
     "spawns": "../data/world/mapa-spawn.xml",
+    "spawnGroups": "../data/spawngroups.xml",
     "creatures": "../creatures.xml",
     "otb": "../../master_sprotbdat/items.otb",
     "dat": "../../master_sprotbdat/Tibia.dat",

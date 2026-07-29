@@ -17,7 +17,7 @@ if (-not (Test-Path -LiteralPath $Config -PathType Leaf)) {
 Write-Host "[1/4] Checking source files..." -ForegroundColor Cyan
 $configObject = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
 $configDirectory = Split-Path -Parent $Config
-foreach ($name in @("map", "otb", "dat", "spr", "creatures")) {
+foreach ($name in @("map", "spawns", "spawnGroups", "otb", "dat", "spr", "creatures")) {
     $configuredPath = $configObject.paths.$name
     if (-not $configuredPath) {
         throw "Missing paths.$name in $Config"
@@ -64,11 +64,13 @@ Write-Host "Update ready." -ForegroundColor Green
 Write-Host "  tiles:          $($manifest.stats.tiles)"
 Write-Host "  item types:     $($manifest.stats.usedItemTypes)"
 Write-Host "  creature types: $($manifest.stats.usedCreatureTypes)"
+Write-Host "  spawn groups:   $($manifest.stats.spawnGroups)"
+Write-Host "  indexed spawns: $($manifest.stats.indexedSpawns)"
 Write-Host "  used sprites:   $($manifest.stats.usedSprites)"
 Write-Host "  atlas pages:    $($manifest.stats.atlasPages)"
 Write-Host "  output size:    $assetMiB MiB"
 
-if ($manifest.stats.missingItems -or $manifest.stats.missingCreatures) {
+if ($manifest.stats.missingItems -or $manifest.stats.missingCreatures -or $manifest.stats.missingSpawnGroups) {
     Write-Host ""
     Write-Warning "The build completed, but manifest.json contains missing item/creature warnings."
 }

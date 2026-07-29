@@ -472,6 +472,19 @@ input::-webkit-inner-spin-button {
   white-space: nowrap;
 }
 
+.spawn-result-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.spawn-result-copy small {
+  color: var(--accent-bright);
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+}
+
 .spawn-result-count {
   color: var(--muted);
   font-size: 10px;
@@ -533,6 +546,23 @@ input::-webkit-inner-spin-button {
   color: var(--muted);
   font-size: 10px;
   font-style: normal;
+}
+
+.spawn-position-meta {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.spawn-position-meta small {
+  max-width: 92px;
+  overflow: hidden;
+  color: var(--accent-bright);
+  font-size: 7px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .spawn-empty {
