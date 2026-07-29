@@ -1,0 +1,26 @@
+{
+  "title": "YurOTS World Map",
+  "output": "docs/assets",
+  "paths": {
+    "map": "../data/world/mapa.otbm",
+    "spawns": "../data/world/mapa-spawn.xml",
+    "creatures": "../creatures.xml",
+    "otb": "../../master_sprotbdat/items.otb",
+    "dat": "../../master_sprotbdat/Tibia.dat",
+    "spr": "../../master_sprotbdat/Tibia.spr"
+  },
+  "dat": {
+    "clientVersion": 760,
+    "spriteIdFormat": "auto",
+    "idleAnimations": "auto",
+    "enhancedAnimations": "auto"
+  },
+  "initialPosition": {
+    "x": 1000,
+    "y": 1000,
+    "z": 7
+  },
+  "chunkSize": 64,
+  "atlasSize": 1024,
+  "overviewPixelsPerTile": 8
+}

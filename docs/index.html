@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#111513">
+    <meta
+      name="description"
+      content="Interaktywny, lekki podgląd świata YurOTS z animowanymi sprite’ami i potworami."
+    >
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="YurOTS World Map">
+    <meta property="og:description" content="Interaktywny podgląd świata YurOTS z animowanymi sprite’ami i potworami.">
+    <meta property="og:image" content="./og-card.jpg">
+    <meta property="og:image:width" content="1536">
+    <meta property="og:image:height" content="1024">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="YurOTS World Map">
+    <meta name="twitter:description" content="Interaktywny podgląd świata YurOTS.">
+    <meta name="twitter:image" content="./og-card.jpg">
+    <title>YurOTS World Map</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main id="map-stage" aria-label="Interaktywna mapa YurOTS">
+      <canvas id="overview-canvas" aria-hidden="true"></canvas>
+      <canvas id="detail-canvas" aria-hidden="true" hidden></canvas>
+
+      <header class="topbar panel">
+        <a class="brand" href="./" aria-label="Wróć do początkowego widoku">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>
+            <strong>YurOTS</strong>
+            <small>WORLD MAP</small>
+          </span>
+        </a>
+
+        <form id="coordinates" class="coordinates" aria-label="Przejdź do pozycji">
+          <label>X <input id="coordinate-x" inputmode="numeric" type="number" required></label>
+          <label>Y <input id="coordinate-y" inputmode="numeric" type="number" required></label>
+          <label>Z <input id="coordinate-z" inputmode="numeric" type="number" min="0" max="15" required></label>
+          <button type="submit" class="button button-primary">Pokaż</button>
+        </form>
+
+        <button id="share-view" class="icon-button share-button" type="button" title="Skopiuj link do widoku" aria-label="Skopiuj link do widoku">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8.7 13.8 15.3 10M8.7 10.2l6.6 3.8M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/>
+          </svg>
+        </button>
+      </header>
+
+      <nav class="map-controls panel" aria-label="Sterowanie mapą">
+        <div class="control-group">
+          <button id="floor-up" class="icon-button floor-button" type="button" title="Piętro wyżej (Z−)" aria-label="Piętro wyżej">+</button>
+          <button id="floor-down" class="icon-button floor-button" type="button" title="Piętro niżej (Z+)" aria-label="Piętro niżej">−</button>
+        </div>
+        <button id="reset-view" class="icon-button reset-button" type="button" title="Widok początkowy" aria-label="Widok początkowy">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 11a8 8 0 1 1 2.3 6.7M4 11V5m0 6h6"/>
+          </svg>
+        </button>
+      </nav>
+
+      <section class="layer-panel panel" aria-label="Warstwy mapy">
+        <p class="eyebrow">WARSTWY</p>
+        <label class="switch-row">
+          <span>Potwory</span>
+          <input id="show-creatures" type="checkbox" checked>
+          <i aria-hidden="true"></i>
+        </label>
+        <label class="switch-row">
+          <span>Animacje</span>
+          <input id="show-animations" type="checkbox" checked>
+          <i aria-hidden="true"></i>
+        </label>
+        <label class="switch-row">
+          <span>Chód potworów</span>
+          <input id="moving-frames" type="checkbox">
+          <i aria-hidden="true"></i>
+        </label>
+        <label class="switch-row">
+          <span>Widoczne piętra</span>
+          <input id="multi-floor" type="checkbox">
+          <i aria-hidden="true"></i>
+        </label>
+      </section>
+
+      <aside id="inspector" class="inspector panel" hidden>
+        <div class="inspector-heading">
+          <div>
+            <p class="eyebrow">POLE MAPY</p>
+            <h2 id="inspector-title">—</h2>
+          </div>
+          <button id="inspector-close" class="icon-button close-button" type="button" aria-label="Zamknij inspektor">×</button>
+        </div>
+        <div id="inspector-content"></div>
+      </aside>
+
+      <footer class="statusbar panel" aria-live="polite">
+        <strong id="map-position">X — · Y — · Z —</strong>
+        <span id="cursor-position">Kursor: —</span>
+        <span id="renderer-status">Uruchamianie…</span>
+      </footer>
+
+      <section id="loading" class="curtain" role="status">
+        <div class="loader" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <p id="loading-text">Uruchamiam mapę…</p>
+      </section>
+
+      <section id="error" class="curtain error-screen" role="alert" hidden>
+        <div class="error-card panel">
+          <span class="error-rune" aria-hidden="true">!</span>
+          <h1>Mapa nie mogła się uruchomić</h1>
+          <p id="error-text"></p>
+          <p class="muted">Otwórz ją przez serwer HTTP, nie bezpośrednio jako plik.</p>
+        </div>
+      </section>
+
+      <div id="toast" class="toast panel" role="status" hidden></div>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
