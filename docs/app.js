@@ -1,6 +1,7 @@
 import { ChunkStore, OverviewStore, loadGzipJson, loadJson } from "./data.js";
 import {
   Camera,
+  CreatureOverlayRenderer,
   DETAIL_ZOOM_THRESHOLD,
   DetailRenderer,
   OverviewRenderer,
@@ -14,6 +15,7 @@ const elements = {
   stage: document.querySelector("#map-stage"),
   overview: document.querySelector("#overview-canvas"),
   detail: document.querySelector("#detail-canvas"),
+  creatureLabels: document.querySelector("#creature-label-canvas"),
   loading: document.querySelector("#loading"),
   loadingText: document.querySelector("#loading-text"),
   error: document.querySelector("#error"),
@@ -29,7 +31,15 @@ const elements = {
   creatures: document.querySelector("#show-creatures"),
   animations: document.querySelector("#show-animations"),
   movingFrames: document.querySelector("#moving-frames"),
+  creatureNames: document.querySelector("#show-creature-names"),
   multiFloor: document.querySelector("#multi-floor"),
+  spawnSearchToggle: document.querySelector("#spawn-search-toggle"),
+  spawnSearch: document.querySelector("#spawn-search"),
+  spawnSearchClose: document.querySelector("#spawn-search-close"),
+  spawnSearchInput: document.querySelector("#spawn-search-input"),
+  spawnSearchBack: document.querySelector("#spawn-search-back"),
+  spawnSearchSummary: document.querySelector("#spawn-search-summary"),
+  spawnSearchResults: document.querySelector("#spawn-search-results"),
   mapPosition: document.querySelector("#map-position"),
   cursorPosition: document.querySelector("#cursor-position"),
   rendererStatus: document.querySelector("#renderer-status"),
@@ -44,17 +54,21 @@ const options = {
   creatures: true,
   animations: true,
   movingCreatureFrames: false,
+  creatureNames: true,
   multiFloor: false,
 };
 
 let manifest;
 let things;
+let spawnIndex = { version: 1, creatures: [] };
+let spawnByCreatureId = new Map();
 let camera;
 let floor;
 let floors = [];
 let chunkStore;
 let overviewStore;
 let detailRenderer;
+let creatureOverlayRenderer;
 let overviewRenderer;
 let framePending = false;
 let animationTimer = 0;
@@ -63,6 +77,8 @@ let activePointer = null;
 let pointerMoved = false;
 let cursorTile = null;
 let toastTimer = 0;
+let selectedSearchCreature = null;
+let focusedSpawn = null;
 
 function clampFloor(value) {
   if (!floors.length) return 7;
@@ -96,12 +112,13 @@ function changeFloor(direction) {
 }
 
 function resize() {
-  if (!camera || !detailRenderer || !overviewRenderer) return;
+  if (!camera || !detailRenderer || !creatureOverlayRenderer || !overviewRenderer) return;
   const width = elements.stage.clientWidth;
   const height = elements.stage.clientHeight;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   camera.resize(width, height);
   detailRenderer.resize(width, height, dpr);
+  creatureOverlayRenderer.resize(width, height, dpr);
   overviewRenderer.resize(width, height, dpr);
   invalidate();
 }
@@ -217,11 +234,24 @@ function render(timeMs) {
     overviewStore.releaseVisibleRanges();
     elements.detail.hidden = false;
     elements.overview.hidden = true;
-    instances = detailRenderer.render(camera, visibleTiles(bounds, renderedFloors), timeMs, options, dpr);
+    elements.creatureLabels.hidden = false;
+    const tiles = visibleTiles(bounds, renderedFloors);
+    instances = detailRenderer.render(camera, tiles, timeMs, options, dpr);
+    creatureOverlayRenderer.render(
+      camera,
+      tiles,
+      things,
+      options,
+      dpr,
+      focusedSpawn?.z === floor ? focusedSpawn : null,
+      timeMs,
+    );
   } else {
     mode = "overview";
     elements.detail.hidden = true;
+    elements.creatureLabels.hidden = true;
     elements.overview.hidden = false;
+    creatureOverlayRenderer.clear(camera, dpr);
     overviewRenderer.render(
       camera,
       visibleOverviews(bounds, renderedFloors),
@@ -357,6 +387,112 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function normalizeSearch(value) {
+  return String(value)
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase("en");
+}
+
+function pluralLabel(count, singular, pluralFew, pluralMany) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (count === 1) return singular;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return pluralFew;
+  return pluralMany;
+}
+
+function renderSpawnSearch() {
+  if (selectedSearchCreature) {
+    const positions = selectedSearchCreature.positions;
+    elements.spawnSearchBack.hidden = false;
+    elements.spawnSearchSummary.textContent = "Wybierz spawn, aby przejść bezpośrednio na jego pozycję.";
+    elements.spawnSearchResults.innerHTML = `
+      <div class="spawn-selected-card">
+        <strong>${escapeHtml(selectedSearchCreature.name)}</strong>
+        <span>${positions.length} ${pluralLabel(positions.length, "spawn", "spawny", "spawnów")}</span>
+      </div>
+      ${positions
+        .map(
+          ([x, y, z], index) => `
+            <button class="spawn-position" type="button" data-position-index="${index}">
+              <span class="spawn-position-number">${String(index + 1).padStart(2, "0")}</span>
+              <strong>X ${x} · Y ${y}</strong>
+              <em>Z ${z}</em>
+            </button>
+          `,
+        )
+        .join("")}
+    `;
+    return;
+  }
+
+  elements.spawnSearchBack.hidden = true;
+  const query = normalizeSearch(elements.spawnSearchInput.value.trim());
+  const matches = spawnIndex.creatures.filter((creature) => normalizeSearch(creature.name).includes(query));
+  const spawnCount = matches.reduce((total, creature) => total + creature.positions.length, 0);
+  elements.spawnSearchSummary.textContent = query
+    ? `${matches.length} ${pluralLabel(matches.length, "wynik", "wyniki", "wyników")} · ${spawnCount} ${pluralLabel(spawnCount, "spawn", "spawny", "spawnów")}`
+    : `${matches.length} rodzajów potworów · ${spawnCount} ${pluralLabel(spawnCount, "spawn", "spawny", "spawnów")}`;
+
+  elements.spawnSearchResults.innerHTML = matches.length
+    ? matches
+        .map(
+          (creature) => `
+            <button class="spawn-result" type="button" data-creature-id="${creature.id}">
+              <span class="spawn-result-name">${escapeHtml(creature.name)}</span>
+              <span class="spawn-result-count">${creature.positions.length} ${pluralLabel(creature.positions.length, "spawn", "spawny", "spawnów")}</span>
+            </button>
+          `,
+        )
+        .join("")
+    : '<p class="spawn-empty">Nie znaleziono takiego potwora na mapie.</p>';
+}
+
+function openSpawnSearch() {
+  elements.spawnSearch.hidden = false;
+  elements.spawnSearchToggle.setAttribute("aria-expanded", "true");
+  renderSpawnSearch();
+  window.requestAnimationFrame(() => {
+    elements.spawnSearchInput.focus();
+    elements.spawnSearchInput.select();
+  });
+}
+
+function closeSpawnSearch() {
+  elements.spawnSearch.hidden = true;
+  elements.spawnSearchToggle.setAttribute("aria-expanded", "false");
+}
+
+function selectSearchCreature(creatureId) {
+  selectedSearchCreature = spawnByCreatureId.get(creatureId) ?? null;
+  if (!selectedSearchCreature) return;
+  elements.spawnSearchInput.value = selectedSearchCreature.name;
+  renderSpawnSearch();
+}
+
+function goToSpawn(positionIndex) {
+  const position = selectedSearchCreature?.positions[positionIndex];
+  if (!position) return;
+  const [x, y, z] = position;
+  options.creatures = true;
+  elements.creatures.checked = true;
+  focusedSpawn = {
+    x,
+    y,
+    z,
+    creatureId: selectedSearchCreature.id,
+    name: selectedSearchCreature.name,
+  };
+  camera.centerOn(x, y);
+  camera.zoom = Math.max(1, camera.zoom);
+  setFloor(z);
+  closeSpawnSearch();
+  updateUrl(true);
+  showToast(`${selectedSearchCreature.name} · ${x}, ${y}, ${z}`);
+  invalidate();
+}
+
 function goToCoordinates(event) {
   event.preventDefault();
   const x = Number(elements.x.value);
@@ -389,7 +525,18 @@ async function shareView() {
 }
 
 function onKeyDown(event) {
-  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLButtonElement) return;
+  const isFormControl = event.target instanceof HTMLInputElement || event.target instanceof HTMLButtonElement;
+  if (event.key === "Escape" && !elements.spawnSearch.hidden) {
+    closeSpawnSearch();
+    event.preventDefault();
+    return;
+  }
+  if (event.key === "/" && !isFormControl) {
+    openSpawnSearch();
+    event.preventDefault();
+    return;
+  }
+  if (isFormControl) return;
   const pan = Math.max(32, Math.min(camera.width, camera.height) * 0.15);
   let handled = true;
   switch (event.key) {
@@ -441,6 +588,7 @@ function bindEvents() {
   elements.floorUp.addEventListener("click", () => changeFloor(-1));
   elements.floorDown.addEventListener("click", () => changeFloor(1));
   elements.resetView.addEventListener("click", () => {
+    focusedSpawn = null;
     camera.centerOn(manifest.map.initial.x, manifest.map.initial.y);
     camera.zoom = 1;
     setFloor(manifest.map.initial.z);
@@ -460,10 +608,39 @@ function bindEvents() {
     options.movingCreatureFrames = elements.movingFrames.checked;
     invalidate();
   });
+  elements.creatureNames.addEventListener("change", () => {
+    options.creatureNames = elements.creatureNames.checked;
+    invalidate();
+  });
   elements.multiFloor.addEventListener("change", () => {
     options.multiFloor = elements.multiFloor.checked;
     closeInspector();
     invalidate();
+  });
+  elements.spawnSearchToggle.addEventListener("click", () => {
+    if (elements.spawnSearch.hidden) openSpawnSearch();
+    else closeSpawnSearch();
+  });
+  elements.spawnSearchClose.addEventListener("click", closeSpawnSearch);
+  elements.spawnSearchBack.addEventListener("click", () => {
+    selectedSearchCreature = null;
+    elements.spawnSearchInput.value = "";
+    renderSpawnSearch();
+    elements.spawnSearchInput.focus();
+  });
+  elements.spawnSearchInput.addEventListener("input", () => {
+    selectedSearchCreature = null;
+    renderSpawnSearch();
+  });
+  elements.spawnSearchResults.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const creatureButton = event.target.closest("[data-creature-id]");
+    if (creatureButton) {
+      selectSearchCreature(Number(creatureButton.dataset.creatureId));
+      return;
+    }
+    const positionButton = event.target.closest("[data-position-index]");
+    if (positionButton) goToSpawn(Number(positionButton.dataset.positionIndex));
   });
   window.addEventListener("keydown", onKeyDown);
   new ResizeObserver(resize).observe(elements.stage);
@@ -480,7 +657,13 @@ async function boot() {
     floors = Object.keys(manifest.map.floors).map(Number).sort((a, b) => a - b);
 
     elements.loadingText.textContent = "Wczytuję definicje użytych sprite’ów…";
-    things = await loadGzipJson(new URL(manifest.assets.things, ASSET_ROOT));
+    [things, spawnIndex] = await Promise.all([
+      loadGzipJson(new URL(manifest.assets.things, ASSET_ROOT)),
+      manifest.assets.spawns
+        ? loadGzipJson(new URL(manifest.assets.spawns, ASSET_ROOT))
+        : Promise.resolve({ version: 1, creatures: [] }),
+    ]);
+    spawnByCreatureId = new Map(spawnIndex.creatures.map((creature) => [creature.id, creature]));
 
     const initial = manifest.map.initial;
     camera = new Camera(
@@ -494,6 +677,7 @@ async function boot() {
     chunkStore = new ChunkStore(manifest, ASSET_ROOT, onDataChange);
     overviewStore = new OverviewStore(manifest, ASSET_ROOT, onDataChange);
     detailRenderer = new DetailRenderer(elements.detail, things, ASSET_ROOT, onDataChange);
+    creatureOverlayRenderer = new CreatureOverlayRenderer(elements.creatureLabels);
     overviewRenderer = new OverviewRenderer(elements.overview);
 
     bindEvents();

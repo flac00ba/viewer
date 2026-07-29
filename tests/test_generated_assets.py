@@ -54,6 +54,8 @@ class GeneratedViewerTests(unittest.TestCase):
         cls.manifest = json.loads((ASSETS / "manifest.json").read_text(encoding="utf-8"))
         with gzip.open(ASSETS / "things.json.gz", "rt", encoding="utf-8") as stream:
             cls.things = json.load(stream)
+        with gzip.open(ASSETS / "spawns.json.gz", "rt", encoding="utf-8") as stream:
+            cls.spawns = json.load(stream)
 
     def test_core_files_exist(self) -> None:
         for relative in (
@@ -84,6 +86,27 @@ class GeneratedViewerTests(unittest.TestCase):
                 self.assertEqual(gzip.decompress(chunk.read_bytes())[:4], b"YMC1")
                 chunk_count += 1
         self.assertEqual(stats["chunks"], chunk_count)
+
+    def test_spawn_search_index_is_consistent(self) -> None:
+        creatures = self.spawns["creatures"]
+        creature_ids = [entry["id"] for entry in creatures]
+        names = [entry["name"] for entry in creatures]
+        positions = [position for entry in creatures for position in entry["positions"]]
+
+        self.assertEqual(self.spawns["version"], 1)
+        self.assertEqual(len(creature_ids), len(set(creature_ids)))
+        self.assertEqual(names, sorted(names, key=str.casefold))
+        self.assertEqual(self.manifest["stats"]["indexedSpawns"], len(positions))
+        self.assertLessEqual(len(positions), self.manifest["stats"]["spawns"])
+
+        chunk_size = self.manifest["map"]["chunkSize"]
+        for entry in creatures:
+            self.assertGreaterEqual(entry["id"], 0)
+            self.assertLess(entry["id"], len(self.things["creatures"]))
+            self.assertEqual(entry["name"], self.things["creatures"][entry["id"]]["name"])
+            for x, y, z in entry["positions"]:
+                descriptor = self.manifest["map"]["floors"][str(z)]
+                self.assertIn([x // chunk_size, y // chunk_size], descriptor["chunks"])
 
     def test_initial_position_points_to_an_existing_chunk(self) -> None:
         initial = self.manifest["map"]["initial"]

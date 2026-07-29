@@ -1,5 +1,6 @@
 const TILE_PIXELS = 32;
 export const DETAIL_ZOOM_THRESHOLD = 0.5;
+export const CREATURE_LABEL_ZOOM_THRESHOLD = 0.85;
 
 const OUTFIT_COLORS = [
   0xffffff, 0xffd4bf, 0xffe9bf, 0xffffbf, 0xe9ffbf, 0xd4ffbf, 0xbfffbf, 0xbfffd4,
@@ -592,6 +593,127 @@ export class DetailRenderer {
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, values.length / 12);
     this.lastInstanceCount = values.length / 12;
     return this.lastInstanceCount;
+  }
+}
+
+export class CreatureOverlayRenderer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.context = canvas.getContext("2d");
+  }
+
+  resize(width, height, dpr) {
+    const physicalWidth = Math.max(1, Math.round(width * dpr));
+    const physicalHeight = Math.max(1, Math.round(height * dpr));
+    if (this.canvas.width !== physicalWidth || this.canvas.height !== physicalHeight) {
+      this.canvas.width = physicalWidth;
+      this.canvas.height = physicalHeight;
+    }
+  }
+
+  clear(camera, dpr) {
+    this.context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.context.clearRect(0, 0, camera.width, camera.height);
+  }
+
+  screenPoint(camera, worldX, worldY) {
+    return {
+      x: (worldX - camera.centerX) * camera.zoom + camera.width / 2,
+      y: (worldY - camera.centerY) * camera.zoom + camera.height / 2,
+    };
+  }
+
+  drawFocus(camera, focus, timeMs) {
+    if (!focus) return;
+    const point = this.screenPoint(
+      camera,
+      (focus.x + 0.5) * TILE_PIXELS,
+      (focus.y + 0.5) * TILE_PIXELS,
+    );
+    if (point.x < -40 || point.y < -40 || point.x > camera.width + 40 || point.y > camera.height + 40) return;
+    const context = this.context;
+    const pulse = 1 + Math.sin(timeMs / 180) * 0.12;
+    const radius = Math.max(11, TILE_PIXELS * camera.zoom * 0.46) * pulse;
+    context.save();
+    context.strokeStyle = "rgba(240, 189, 120, 0.95)";
+    context.fillStyle = "rgba(212, 154, 82, 0.12)";
+    context.lineWidth = 2;
+    context.shadowColor = "rgba(240, 189, 120, 0.5)";
+    context.shadowBlur = 9;
+    context.beginPath();
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    context.restore();
+  }
+
+  render(camera, tiles, things, options, dpr, focus, timeMs) {
+    this.clear(camera, dpr);
+    if (!options.creatures) return;
+    this.drawFocus(camera, focus, timeMs);
+    if (!options.creatureNames || camera.zoom < CREATURE_LABEL_ZOOM_THRESHOLD) return;
+
+    const context = this.context;
+    context.font = "700 12px Inter, ui-sans-serif, system-ui, sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "bottom";
+    context.lineJoin = "round";
+    const labels = [];
+
+    for (const tile of tiles) {
+      const drawX = tile.drawX ?? tile.x;
+      const drawY = tile.drawY ?? tile.y;
+      for (const entry of tile.entries) {
+        if (entry.kind !== 1) continue;
+        const creature = things.creatures[entry.id];
+        if (!creature?.thing) continue;
+        const height = Math.max(1, ...creature.thing.groups.map((group) => group.height ?? 1));
+        const point = this.screenPoint(
+          camera,
+          (drawX + 0.5) * TILE_PIXELS,
+          drawY * TILE_PIXELS - (height - 1) * TILE_PIXELS - creature.thing.offsetY - 5,
+        );
+        if (point.x < -120 || point.x > camera.width + 120 || point.y < -30 || point.y > camera.height + 30) {
+          continue;
+        }
+        labels.push({
+          name: creature.name,
+          x: point.x,
+          y: point.y,
+          focused:
+            focus?.x === tile.x &&
+            focus?.y === tile.y &&
+            focus?.z === tile.z &&
+            focus?.creatureId === entry.id,
+        });
+      }
+    }
+
+    labels.sort((a, b) => Number(a.focused) - Number(b.focused));
+    const occupied = [];
+    for (const label of labels) {
+      const width = Math.ceil(context.measureText(label.name).width) + 10;
+      const box = {
+        left: label.x - width / 2,
+        right: label.x + width / 2,
+        top: label.y - 16,
+        bottom: label.y + 2,
+      };
+      const collides = occupied.some(
+        (other) =>
+          box.left < other.right &&
+          box.right > other.left &&
+          box.top < other.bottom &&
+          box.bottom > other.top,
+      );
+      if (collides && !label.focused) continue;
+      occupied.push(box);
+      context.lineWidth = label.focused ? 4.5 : 3.5;
+      context.strokeStyle = "rgba(7, 10, 8, 0.92)";
+      context.fillStyle = label.focused ? "#f0bd78" : "#eef3ea";
+      context.strokeText(label.name, label.x, label.y);
+      context.fillText(label.name, label.x, label.y);
+    }
   }
 }
 

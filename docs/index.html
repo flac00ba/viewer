@@ -25,6 +25,7 @@
     <main id="map-stage" aria-label="Interaktywna mapa YurOTS">
       <canvas id="overview-canvas" aria-hidden="true"></canvas>
       <canvas id="detail-canvas" aria-hidden="true" hidden></canvas>
+      <canvas id="creature-label-canvas" aria-hidden="true" hidden></canvas>
 
       <header class="topbar panel">
         <a class="brand" href="./" aria-label="Wróć do początkowego widoku">
@@ -59,6 +60,17 @@
             <path d="M4 11a8 8 0 1 1 2.3 6.7M4 11V5m0 6h6"/>
           </svg>
         </button>
+        <button
+          id="spawn-search-toggle"
+          class="icon-button search-button"
+          type="button"
+          title="Znajdź potwora"
+          aria-label="Znajdź potwora"
+          aria-expanded="false"
+          aria-controls="spawn-search"
+        >
+          <span class="search-glyph" aria-hidden="true"></span>
+        </button>
       </nav>
 
       <section class="layer-panel panel" aria-label="Warstwy mapy">
@@ -79,10 +91,45 @@
           <i aria-hidden="true"></i>
         </label>
         <label class="switch-row">
+          <span>Nazwy potworów</span>
+          <input id="show-creature-names" type="checkbox" checked>
+          <i aria-hidden="true"></i>
+        </label>
+        <label class="switch-row">
           <span>Widoczne piętra</span>
           <input id="multi-floor" type="checkbox">
           <i aria-hidden="true"></i>
         </label>
+      </section>
+
+      <section id="spawn-search" class="spawn-search panel" aria-label="Wyszukiwanie potworów" hidden>
+        <header class="spawn-search-heading">
+          <div>
+            <p class="eyebrow">BESTIARIUM</p>
+            <h2>Znajdź potwora</h2>
+          </div>
+          <button
+            id="spawn-search-close"
+            class="icon-button close-button"
+            type="button"
+            aria-label="Zamknij wyszukiwanie"
+          >×</button>
+        </header>
+
+        <label class="spawn-search-field">
+          <span class="search-glyph" aria-hidden="true"></span>
+          <input
+            id="spawn-search-input"
+            type="search"
+            placeholder="Wpisz nazwę, np. dragon"
+            autocomplete="off"
+            spellcheck="false"
+          >
+        </label>
+
+        <button id="spawn-search-back" class="spawn-search-back" type="button" hidden>← Wszystkie potwory</button>
+        <p id="spawn-search-summary" class="spawn-search-summary" aria-live="polite"></p>
+        <div id="spawn-search-results" class="spawn-search-results"></div>
       </section>
 
       <aside id="inspector" class="inspector panel" hidden>

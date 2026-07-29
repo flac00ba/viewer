@@ -790,6 +790,32 @@ def build(config_path: Path) -> None:
         },
     )
 
+    spawn_positions: dict[int, list[list[int]]] = defaultdict(list)
+    for spawn in spawns:
+        creature_index = creature_indices.get(spawn.name.casefold())
+        if creature_index is not None:
+            spawn_positions[creature_index].append([spawn.x, spawn.y, spawn.z])
+    for positions in spawn_positions.values():
+        positions.sort(key=lambda position: (position[2], position[1], position[0]))
+    indexed_spawn_count = sum(len(positions) for positions in spawn_positions.values())
+    _gzip_json(
+        output_path / "spawns.json.gz",
+        {
+            "version": 1,
+            "creatures": [
+                {
+                    "id": creature_index,
+                    "name": creatures_payload[creature_index]["name"],
+                    "positions": spawn_positions[creature_index],
+                }
+                for creature_index in sorted(
+                    spawn_positions,
+                    key=lambda index: creatures_payload[index]["name"].casefold(),
+                )
+            ],
+        },
+    )
+
     print("[5/7] Splitting the map into compressed spatial chunks...")
     chunk_size = int(config.get("chunkSize", 64))
     chunks: dict[tuple[int, int, int], list[ChunkTile]] = defaultdict(list)
@@ -866,11 +892,15 @@ def build(config_path: Path) -> None:
             "floors": floors_payload,
             "initial": initial,
         },
-        "assets": {"things": "things.json.gz"},
+        "assets": {
+            "things": "things.json.gz",
+            "spawns": "spawns.json.gz",
+        },
         "stats": {
             "tiles": len(world.tiles),
             "items": sum(len(tile.items) for tile in world.tiles),
             "spawns": len(spawns),
+            "indexedSpawns": indexed_spawn_count,
             "usedItemTypes": len(item_things),
             "usedCreatureTypes": len(creature_things),
             "usedSprites": len(used_sprite_ids),
