@@ -1,7 +1,7 @@
 {
   "version": 1,
   "title": "YurOTS World Map",
-  "generatedAt": "2026-08-01T21:30:25.167994+00:00",
+  "generatedAt": "2026-08-01T21:41:18.806747+00:00",
   "map": {
     "name": "mapa.otbm",
     "width": 2048,
@@ -12,10 +12,10 @@
     "floors": {
       "0": {
         "bounds": [
-          1103,
+          1102,
           1182,
           1220,
-          1355
+          1358
         ],
         "chunks": [
           [
@@ -31,7 +31,7 @@
             18
           ]
         ],
-        "tileCount": 82
+        "tileCount": 195
       },
       "1": {
         "bounds": [
@@ -2030,15 +2030,15 @@
     "spawns": "spawns.json.gz"
   },
   "stats": {
-    "tiles": 693306,
-    "items": 846899,
+    "tiles": 693419,
+    "items": 847078,
     "spawns": 2447,
     "indexedSpawns": 2447,
     "spawnSearchLinks": 2660,
     "spawnGroups": 1,
-    "usedItemTypes": 5285,
+    "usedItemTypes": 5287,
     "usedCreatureTypes": 74,
-    "usedSprites": 22827,
+    "usedSprites": 22835,
     "atlasPages": 19,
     "chunks": 458,
     "missingItems": 0,
