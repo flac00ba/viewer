@@ -1,7 +1,7 @@
 {
   "version": 1,
   "title": "YurOTS World Map",
-  "generatedAt": "2026-08-01T21:17:05.796897+00:00",
+  "generatedAt": "2026-08-01T21:30:25.167994+00:00",
   "map": {
     "name": "mapa.otbm",
     "width": 2048,
@@ -12,12 +12,16 @@
     "floors": {
       "0": {
         "bounds": [
-          1204,
+          1103,
           1182,
           1220,
-          1191
+          1355
         ],
         "chunks": [
+          [
+            17,
+            21
+          ],
           [
             18,
             18
@@ -27,48 +31,13 @@
             18
           ]
         ],
-        "tileCount": 43
+        "tileCount": 82
       },
       "1": {
         "bounds": [
           963,
           941,
           1247,
-          1191
-        ],
-        "chunks": [
-          [
-            15,
-            14
-          ],
-          [
-            15,
-            15
-          ],
-          [
-            18,
-            17
-          ],
-          [
-            18,
-            18
-          ],
-          [
-            19,
-            17
-          ],
-          [
-            19,
-            18
-          ]
-        ],
-        "tileCount": 1660
-      },
-      "2": {
-        "bounds": [
-          961,
-          941,
-          1269,
           1359
         ],
         "chunks": [
@@ -81,6 +50,49 @@
             15
           ],
           [
+            17,
+            20
+          ],
+          [
+            17,
+            21
+          ],
+          [
+            18,
+            17
+          ],
+          [
+            18,
+            18
+          ],
+          [
+            19,
+            17
+          ],
+          [
+            19,
+            18
+          ]
+        ],
+        "tileCount": 1879
+      },
+      "2": {
+        "bounds": [
+          961,
+          941,
+          1269,
+          1360
+        ],
+        "chunks": [
+          [
+            15,
+            14
+          ],
+          [
+            15,
+            15
+          ],
+          [
             15,
             18
           ],
@@ -109,14 +121,14 @@
             18
           ]
         ],
-        "tileCount": 5016
+        "tileCount": 5026
       },
       "3": {
         "bounds": [
           927,
           941,
           1485,
-          1360
+          1361
         ],
         "chunks": [
           [
@@ -188,7 +200,7 @@
             18
           ]
         ],
-        "tileCount": 7112
+        "tileCount": 7128
       },
       "4": {
         "bounds": [
@@ -299,7 +311,7 @@
             18
           ]
         ],
-        "tileCount": 12685
+        "tileCount": 12690
       },
       "5": {
         "bounds": [
@@ -438,7 +450,7 @@
             18
           ]
         ],
-        "tileCount": 18928
+        "tileCount": 18929
       },
       "6": {
         "bounds": [
@@ -2018,17 +2030,17 @@
     "spawns": "spawns.json.gz"
   },
   "stats": {
-    "tiles": 693016,
-    "items": 846482,
+    "tiles": 693306,
+    "items": 846899,
     "spawns": 2447,
     "indexedSpawns": 2447,
     "spawnSearchLinks": 2660,
     "spawnGroups": 1,
-    "usedItemTypes": 5284,
+    "usedItemTypes": 5285,
     "usedCreatureTypes": 74,
-    "usedSprites": 22811,
+    "usedSprites": 22827,
     "atlasPages": 19,
-    "chunks": 455,
+    "chunks": 458,
     "missingItems": 0,
     "missingCreatures": 0,
     "missingSpawnGroups": 0
